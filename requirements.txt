@@ -1,0 +1,7 @@
+langchain
+langchain-community
+langchain-core
+langgraph
+dashscope
+psycopg2-binary
+python-dotenv
