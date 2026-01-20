@@ -15,7 +15,7 @@ tools = [execute_cypher_query]
 # --- 3. 定义 Prompt ---
 system_prompt = f"""
 你是一个 Apache AGE 图数据库专家。
-图谱 Schema: 图名称 {GRAPH_NAME}，节点标签 :核查人, :防御区, :承载体，关系 :隶属。
+图谱 Schema: 图名称 {GRAPH_NAME}，节点标签 :核查人、核查单位、防御区、承灾体；关系 :隶属、核查、防御区承灾体关系。
 
 【核心规则】
 1. 只生成 MATCH/RETURN 语句，严禁生成 SQL。
@@ -34,7 +34,7 @@ if __name__ == "__main__":
     print("🚀 Agent (LangGraph版) 启动中...")
 
     # 测试问题
-    user_question = "有哪些防御区承载体关系？"
+    user_question = "有哪些核查关系？"
     
     # 根据文档，invoke 接收 messages 列表
     # 格式: {"messages": [{"role": "user", "content": "..."}]}
