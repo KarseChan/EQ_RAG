@@ -6,6 +6,7 @@ from config import DB_CONFIG, GRAPH_NAME
 
 def _clean_age_data(raw_data):
     """(内部函数) 清洗 AGE 返回的数据，去除 ::vertex 等后缀"""
+    print(f"[Tool] 清洗前的数据：{raw_data}")
     if isinstance(raw_data, str):
         clean_str = raw_data.split('::')[0]
         try:
@@ -38,14 +39,18 @@ def execute_cypher_query(cypher_query: str) -> str:
             {cypher_query}
         $$) as (result agtype);
         """
+
+        print(f"\n[Tool] 组装 sql: {full_sql}")
         
         cursor.execute(full_sql)
         rows = cursor.fetchall()
         
         # 清洗结果
-        results = [_clean_age_data(row[0]) for row in rows]
+        # results = [_clean_age_data(row[0]) for row in rows]
+        results = [row[0] for row in rows]
         
         print(f"[Tool] 返回 {len(results)} 条数据")
+        print(f"[Tool] ：{results}")
         return json.dumps(results, ensure_ascii=False)
         
     except Exception as e:
