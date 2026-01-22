@@ -1,128 +1,178 @@
+# app.py
 import streamlit as st
+import pandas as pd
+import json
 from langchain_community.chat_models import ChatTongyi
 from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from streamlit_agraph import agraph, Node, Edge, Config
 
-# 复用我们之前解耦好的模块
+# --- 导入解耦的模块 ---
 from config import GRAPH_NAME
-from tools import execute_cypher_query
-
-# 运行方式：
-# streamlit run app.py
-# streamlit run app.py --server.address 0.0.0.0
+from tools import execute_cypher_query, generate_graph_from_data
+from prompts import get_system_prompt       
+from memory import build_chat_context       
 
 # ================== 1. 页面配置 ==================
-st.set_page_config(
-    page_title="图数据库智能助手",
-    page_icon="🤖",
-    layout="centered"
-)
+st.set_page_config(page_title="地灾数据助手", page_icon="🌍", layout="centered")
 
-st.title(f"🤖 地灾数据智能问答助手")
-st.caption(f"当前连接图谱: `{GRAPH_NAME}`")
+# ================== 2. 侧边栏配置 ==================
+with st.sidebar:
+    st.header("⚙️ 设置面板")
+    
+    # --- 记忆策略控制 ---
+    st.subheader("🧠 记忆设置")
+    memory_type = st.radio(
+        "记忆模式",
+        ("滑动窗口 (推荐)", "全量记忆 (Token消耗大)", "不记忆 (单轮对话)"),
+        index=0
+    )
+    
+    # 映射 UI 选项到代码策略 key
+    strategy_map = {
+        "滑动窗口 (推荐)": "window",
+        "全量记忆 (Token消耗大)": "full",
+        "不记忆 (单轮对话)": "none"
+    }
+    selected_strategy = strategy_map[memory_type]
+    
+    # 只有选滑动窗口时才显示滑块
+    window_k = 6
+    if selected_strategy == "window":
+        window_k = st.slider("记忆轮数 (消息条数)", min_value=2, max_value=20, value=6, step=2)
 
-# ================== 2. 初始化 Agent (带缓存) ==================
-# 使用 cache_resource 装饰器，防止每次点击按钮都重新加载模型
+    st.divider()
+    
+    # --- 常用功能 ---
+    if st.button("🗑️ 清空对话历史", width='stretch'):
+        st.session_state.messages = []
+        st.rerun()
+
+    st.markdown("### 💡 快捷提问")
+    example_questions = ["441323103033546防御区是谁核查的？", "id为441323103033546的防御区有哪些承灾体？", "朱炳湖负责哪些防御区"]
+    for q in example_questions:
+        if st.button(q, width='stretch'):
+            st.session_state.current_prompt = q
+
+# ================== 3. 主界面 & Agent 初始化 ==================
+st.title(f"🌍 地灾数据智能助手")
+st.caption(f"当前连接图谱: `{GRAPH_NAME}` | 记忆模式: `{memory_type}`")
+
 @st.cache_resource
-def get_agent():
+def get_agent_instance():
+    # 初始化模型
     llm = ChatTongyi(model_name="qwen-max", temperature=0)
     tools = [execute_cypher_query]
     
-    system_prompt = f"""
-你是一个 Apache AGE 图数据库专家。
-图谱 Schema: 
--图名称 {GRAPH_NAME}
--节点标签 :核查人、核查单位、防御区、承灾体
--关系类型 :隶属、核查、防御区承灾体关系
-
-- **【重要属性规则】**: 
-1. **名称/名字查询**: 用户输入名称（如张三、A区）时，属性键**固定为 '姓名'**。
-   - 示例: "找张三" -> MATCH (n {{姓名: '张三'}})
-2. **ID 查询**: 用户提供 "ID" 或 "编号" 时，必须根据节点类型选择对应的唯一标识字段：
-   - 防御区 -> 属性键为 '防御区唯一标识'
-   - 承灾体 -> 属性键为 '承灾体唯一标识'
-   - 核查人 -> 属性键为 '姓名' 
-   - 示例: "ID为123的防御区" -> MATCH (n:防御区 {{防御区唯一标识: '123'}})
-
-【核心规则】
-1. 只生成 MATCH/RETURN 语句，严禁生成 SQL。
-2. **【强制】变量绑定规则**:
-   在 MATCH 子句中，**必须**为关系指定变量名（通常用 `r`），**严禁**使用匿名关系！
-   - ❌ 错误写法: `MATCH (a)-[:核查]->(b)` (会导致后面无法引用 r)
-   - ✅ 正确写法: `MATCH (a)-[r:核查]->(b)` (必须显式定义 r)
-
-3. **【关键】返回格式规范**：
-   - **查节点时**：返回节点本身。MATCH (n:核查人) RETURN {{node: n}}
-   - **查关系时**：必须同时返回【起点、关系、终点】组成的完整上下文。
-     ✅ 正确：MATCH (a)-[r:隶属]->(b) RETURN {{source: a, rel: r, target: b}}
-   
-4. 必须将所有返回字段封装在一个 Map 对象中。
-"""
+    # 从 prompts.py 获取提示词
+    system_prompt = get_system_prompt()
     
     return create_agent(model=llm, tools=tools, system_prompt=system_prompt)
 
-agent = get_agent()
+agent = get_agent_instance()
 
-# ================== 3. 管理聊天记录 ==================
-# 如果 session_state 中没有 messages，初始化一个空的
+# ================== 4. 渲染历史与处理输入 ==================
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 在界面上重绘历史消息
+# 渲染历史
 for msg in st.session_state.messages:
-    # 区分用户消息和 AI 消息的头像
     avatar = "🧑‍💻" if isinstance(msg, HumanMessage) else "🤖"
     with st.chat_message(msg.type, avatar=avatar):
         st.markdown(msg.content)
 
-# ================== 4. 处理用户输入 ==================
-if prompt := st.chat_input("请输入你想查询的内容（例如：有哪些核查人？）..."):
-    # 1. 显示用户输入
+# 2. 获取输入（关键修改：让 chat_input 始终渲染）
+chat_input_text = st.chat_input("请输入查询内容...")
+button_input_text = st.session_state.get("current_prompt", None)
+
+# 3. 决定最终使用哪个输入 (优先响应按钮，其次响应输入框)
+user_input = None
+
+if button_input_text:
+    user_input = button_input_text
+    # 消费掉这个状态，防止刷新后死循环
+    del st.session_state["current_prompt"]
+elif chat_input_text:
+    user_input = chat_input_text
+
+if user_input:
+    if "current_prompt" in st.session_state: del st.session_state["current_prompt"]
+
+    # 1. UI 显示用户问题
     with st.chat_message("user", avatar="🧑‍💻"):
-        st.markdown(prompt)
-    # 将用户消息加入历史
-    st.session_state.messages.append(HumanMessage(content=prompt))
+        st.markdown(user_input)
 
     # 2. 调用 Agent
     with st.chat_message("assistant", avatar="🤖"):
-        message_placeholder = st.empty()
-        message_placeholder.markdown("🧠 正在思考并查询数据库...")
+        msg_placeholder = st.empty()
+        status = st.status("🧠 思考中...", expanded=True)
         
         try:
-            # 构造 LangGraph 需要的输入格式
-            # 注意：我们需要把整个历史记录传给 Agent，这样它才有上下文记忆
-            # 但为了节省 Token，简单场景也可以只传最新的一条
+            status.write(f"正在构建上下文 (策略: {selected_strategy})...")
             
-            # 这里我们只传最新问题，避免把旧的 Tool 调用记录搞乱
-            input_data = {
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ]
-            }
+            # [新] 调用 memory.py 构建上下文
+            input_payload = build_chat_context(
+                current_prompt=user_input,
+                history=st.session_state.messages,
+                strategy=selected_strategy,
+                k=window_k
+            )
 
-            # 把 session_state 里的所有消息传给 Agent
-            # full_history = st.session_state.messages
+            # 
             # input_data = {
-            #     "messages": full_history
-            # }
-
-            # 只取最后 6 条消息作为上下文
-            # recent_history = st.session_state.messages[-6:] 
-            # input_data = {
-            #     "messages": recent_history
+            #     "messages": [
+            #         {"role": "user", "content": user_input}
+            #     ]
             # }
             
-            # 执行调用
-            result = agent.invoke(input_data)
-            
-            # 获取最终回复
+            # Agent 执行
+            result = agent.invoke(input_payload)
+            # result = agent.invoke(input_data)
+
             final_response = result['messages'][-1].content
+
+            # --- 数据提取逻辑 ---
+            raw_data_json = None # 保存原始 JSON 列表
+            raw_data_df = None   # 保存表格 DF
+
+            for msg in result['messages']:
+                if isinstance(msg, ToolMessage):
+                    try:
+                        data = json.loads(msg.content)
+                        if isinstance(data, list) and len(data) > 0:
+                            raw_data_json = data # 拿到原始数据列表
+                            raw_data_df = pd.json_normalize(data)
+                    except: pass
             
-            # 显示结果
-            message_placeholder.markdown(final_response)
+            # === 1. 展示图谱 (新增功能) ===
+            # if raw_data_jPson is not None:
+            #     # 只有当数据里包含 source/target 结构时才画图，防止纯节点查询报错
+            #     # 简单的判断逻辑：看第一条数据有没有 'source' 键
+            #     if "source" in raw_data_json[0] and "target" in raw_data_json[0]:
+            #         with st.expander("🕸️ 知识图谱可视化", expanded=True):
+            #             nodes, edges, config = generate_graph_from_data(raw_data_json)
+            #             # 渲染图谱
+            #             agraph(nodes=nodes, edges=edges, config=config)
             
-            # 将 AI 回复加入历史
-            st.session_state.messages.append(AIMessage(content=final_response))
+            # === 2. 展示表格 (原有功能) ===
+            print(f'raw_data_df: {raw_data_df}')
+
+            if raw_data_df is not None:
+                with st.expander("📊 数据明细表", expanded=False):
+                    st.dataframe(raw_data_df, width='stretch')
+                    csv = raw_data_df.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button("📥 下载 CSV", csv, "data.csv", "text/csv")
+
+            status.update(label="✅ 完成", state="complete", expanded=False)
+            
+            
+            # 显示文本回复
+            msg_placeholder.markdown(final_response)
+            
+            # 3. 更新历史 (成功后才存入)
+            # st.session_state.messages.append(HumanMessage(content=user_input))
+            # st.session_state.messages.append(AIMessage(content=final_response))
             
         except Exception as e:
-            message_placeholder.error(f"❌ 发生错误: {str(e)}")
+            status.update(label="❌ 出错", state="error")
+            msg_placeholder.error(f"Error: {str(e)}")

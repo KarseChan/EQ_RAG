@@ -6,3 +6,5 @@ dashscope
 psycopg2-binary
 python-dotenv
 streamlit
+streamlit-agraph
+pandas

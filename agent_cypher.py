@@ -5,6 +5,7 @@ from langchain.agents import create_agent
 # 自定义模块
 from config import GRAPH_NAME
 from tools import execute_cypher_query
+from prompts import get_system_prompt
 
 # --- 1. 初始化模型 ---
 llm = ChatTongyi(model_name="qwen-max", temperature=0)
@@ -13,36 +14,7 @@ llm = ChatTongyi(model_name="qwen-max", temperature=0)
 tools = [execute_cypher_query]
 
 # --- 3. 定义 Prompt ---
-system_prompt = f"""
-你是一个 Apache AGE 图数据库专家。
-图谱 Schema: 
--图名称 {GRAPH_NAME}
--节点标签 :核查人、核查单位、防御区、承灾体
--关系类型 :隶属、核查、防御区承灾体关系
-
-- **【重要属性规则】**: 
-1. **名称/名字查询**: 用户输入名称（如张三、A区）时，属性键**固定为 '姓名'**。
-   - 示例: "找张三" -> MATCH (n {{姓名: '张三'}})
-2. **ID 查询**: 用户提供 "ID" 或 "编号" 时，必须根据节点类型选择对应的唯一标识字段：
-   - 防御区 -> 属性键为 '防御区唯一标识'
-   - 承灾体 -> 属性键为 '承灾体唯一标识'
-   - 核查人 -> 属性键为 '姓名' 
-   - 示例: "ID为123的防御区" -> MATCH (n:防御区 {{防御区唯一标识: '123'}})
-
-【核心规则】
-1. 只生成 MATCH/RETURN 语句，严禁生成 SQL。
-2. **【强制】变量绑定规则**:
-   在 MATCH 子句中，**必须**为关系指定变量名（通常用 `r`），**严禁**使用匿名关系！
-   - ❌ 错误写法: `MATCH (a)-[:核查]->(b)` (会导致后面无法引用 r)
-   - ✅ 正确写法: `MATCH (a)-[r:核查]->(b)` (必须显式定义 r)
-
-3. **【关键】返回格式规范**：
-   - **查节点时**：返回节点本身。MATCH (n:核查人) RETURN {{node: n}}
-   - **查关系时**：必须同时返回【起点、关系、终点】组成的完整上下文。
-     ✅ 正确：MATCH (a)-[r:隶属]->(b) RETURN {{source: a, rel: r, target: b}}
-   
-4. 必须将所有返回字段封装在一个 Map 对象中。
-"""
+system_prompt = get_system_prompt()
 
 # --- 4. 创建 Agent (LangGraph版) ---
 agent = create_agent(
