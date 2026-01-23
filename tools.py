@@ -1,20 +1,31 @@
-import json
+import json, re
 import psycopg2
 from langchain_core.tools import tool
 from streamlit_agraph import agraph, Node, Edge, Config
-# 引用 config，实现解耦
+
 from config import DB_CONFIG, GRAPH_NAME
+from prompts import get_zero_results_hint
 
 def _clean_age_data(raw_data):
-    """(内部函数) 清洗 AGE 返回的数据，去除 ::vertex 等后缀"""
-    print(f"[Tool] 清洗前的数据：{raw_data}")
-    if isinstance(raw_data, str):
-        clean_str = raw_data.split('::')[0]
-        try:
-            return json.loads(clean_str)
-        except:
-            return clean_str
-    return raw_data
+    """
+    (内部函数) 使用正则清洗 AGE 返回的数据，去除 ::vertex, ::edge, ::numeric 等后缀
+    """
+    # 1. 如果不是字符串（比如已经是数字或None），直接返回
+    if not isinstance(raw_data, str):
+        return raw_data
+
+    # print(f"[Debug] 清洗前: {raw_data}")
+
+    # 2. 核心修改：使用正则替换，将 "::xxxx" 替换为空字符串
+    # r'::\w+' 匹配双冒号后跟任意字母/数字/下划线
+    clean_str = re.sub(r'::\w+', '', raw_data)
+
+    # 3. 尝试解析 JSON
+    try:
+        return json.loads(clean_str)
+    except json.JSONDecodeError:
+        # 如果不是 JSON（比如只是普通字符串 "Hello"），就返回清洗后的字符串
+        return clean_str
 
 @tool
 def execute_cypher_query(cypher_query: str) -> str:
@@ -47,20 +58,13 @@ def execute_cypher_query(cypher_query: str) -> str:
         rows = cursor.fetchall()
         
         # 清洗结果
-        # results = [_clean_age_data(row[0]) for row in rows]
-        results = [row[0] for row in rows]
+        results = [_clean_age_data(row[0]) for row in rows]
+        # results = [row[0] for row in rows]
 
         # === 核心修改：零结果处理策略 ===
         if len(results) == 0:
             print("[Tool] ⚠️ 查询结果为空，返回引导提示")
-            return (
-                "可能原因：属性名错误、属性值不匹配（精确匹配失败）或关系方向错误。"
-                "请尝试以下策略进行修正（按顺序尝试）："
-                "1. **模糊查询**: 如果你使用了 `{key: 'value'}`，请改为 `WHERE n.key CONTAINS 'value'` 再次尝试。"
-                "2. **查看字典**: 查询该属性的所有去重值，确认数据库中的真实写法 (例如: MATCH (n:TargetLabel) RETURN DISTINCT n.TargetProperty)。"
-                "3. **放宽条件**: 移除属性限制，仅查询节点或关系是否存在 (例如: MATCH (n:TargetLabel) RETURN n)。"
-                "4. **检查Schema**: 确认你使用的 Label 和属性名是否符合 Schema 定义。"
-            )
+            return get_zero_results_hint(query_info=cypher_query)
         # ===============================
 
         print(f"[Tool] 返回 {len(results)} 条数据")

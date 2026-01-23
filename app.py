@@ -49,7 +49,7 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("### 💡 快捷提问")
-    example_questions = ["朱炳湖负责的防御区中面积最大的是哪个？", "哪些防御区风险等级是中级？"]
+    example_questions = ["朱炳湖负责的防御区中面积最大的是哪个？", "哪些防御区风险等级是中级？", "承灾体里威胁财产最多的前5个？"]
     for q in example_questions:
         if st.button(q, width='stretch'):
             st.session_state.current_prompt = q
@@ -136,13 +136,17 @@ if user_input:
             raw_data_json = None # 保存原始 JSON 列表
             raw_data_df = None   # 保存表格 DF
 
+            print(f"[App] ：{result['messages']}")
+
+            # 提取数据
+            raw_data_list = []
             for msg in result['messages']:
                 if isinstance(msg, ToolMessage):
                     try:
+                        # 因为 Tool 已经清洗干净了，这里直接 load 就行
                         data = json.loads(msg.content)
-                        if isinstance(data, list) and len(data) > 0:
-                            raw_data_json = data # 拿到原始数据列表
-                            raw_data_df = pd.json_normalize(data)
+                        if isinstance(data, list):
+                            raw_data_list = data
                     except: pass
             
             # === 1. 展示图谱 (新增功能) ===
@@ -157,12 +161,10 @@ if user_input:
             
             # === 2. 展示表格 (原有功能) ===
             print(f'raw_data_df: {raw_data_df}')
-
-            if raw_data_df is not None:
-                with st.expander("📊 数据明细表", expanded=False):
-                    st.dataframe(raw_data_df, width='stretch')
-                    csv = raw_data_df.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button("📥 下载 CSV", csv, "data.csv", "text/csv")
+            # 显示表格
+            if raw_data_list:
+                df = pd.json_normalize(raw_data_list)
+                st.dataframe(df)
 
             status.update(label="✅ 完成", state="complete", expanded=False)
             
