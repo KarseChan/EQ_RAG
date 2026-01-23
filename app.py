@@ -49,7 +49,7 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("### 💡 快捷提问")
-    example_questions = ["441323103033546防御区是谁核查的？", "id为441323103033546的防御区有哪些承灾体？", "朱炳湖负责哪些防御区"]
+    example_questions = ["朱炳湖负责的防御区中面积最大的是哪个？", "哪些防御区风险等级是中级？"]
     for q in example_questions:
         if st.button(q, width='stretch'):
             st.session_state.current_prompt = q
@@ -66,6 +66,7 @@ def get_agent_instance():
     
     # 从 prompts.py 获取提示词
     system_prompt = get_system_prompt()
+    print(f"[app] 提示词： {system_prompt}")
     
     return create_agent(model=llm, tools=tools, system_prompt=system_prompt)
 

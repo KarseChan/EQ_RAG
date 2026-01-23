@@ -49,7 +49,20 @@ def execute_cypher_query(cypher_query: str) -> str:
         # 清洗结果
         # results = [_clean_age_data(row[0]) for row in rows]
         results = [row[0] for row in rows]
-        
+
+        # === 核心修改：零结果处理策略 ===
+        if len(results) == 0:
+            print("[Tool] ⚠️ 查询结果为空，返回引导提示")
+            return (
+                "可能原因：属性名错误、属性值不匹配（精确匹配失败）或关系方向错误。"
+                "请尝试以下策略进行修正（按顺序尝试）："
+                "1. **模糊查询**: 如果你使用了 `{key: 'value'}`，请改为 `WHERE n.key CONTAINS 'value'` 再次尝试。"
+                "2. **查看字典**: 查询该属性的所有去重值，确认数据库中的真实写法 (例如: MATCH (n:TargetLabel) RETURN DISTINCT n.TargetProperty)。"
+                "3. **放宽条件**: 移除属性限制，仅查询节点或关系是否存在 (例如: MATCH (n:TargetLabel) RETURN n)。"
+                "4. **检查Schema**: 确认你使用的 Label 和属性名是否符合 Schema 定义。"
+            )
+        # ===============================
+
         print(f"[Tool] 返回 {len(results)} 条数据")
         print(f"[Tool] ：{results}")
         return json.dumps(results, ensure_ascii=False)
