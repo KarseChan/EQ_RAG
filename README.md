@@ -7,7 +7,7 @@
 - **🧠 智能问答 (Text-to-Cypher)**: 将自然语言自动转换为 Cypher 查询语句，直接从图数据库中提取答案。
 - **🕸️ 混合检索 (Hybrid Search)**:
   - **图检索**: 基于 Apache AGE，处理多跳关系查询（如“朱炳湖核查了哪些高风险区域？”）。
-  - **向量检索**: 基于 `pgvector`，处理抽象语义查询（如“哪里容易发生泥石流？”）。
+  - **向量检索**: 基于 `pgvector`，处理抽象语义查询（如“哪里容易发生泥石流？”）。【待实现】
 - **📊 可视化交互**: 集成 `streamlit-agraph`，动态展示知识图谱节点关系。
 - **🛡️ 智能纠错**: 具备自我反思机制，当查询无结果时自动尝试模糊匹配或放宽条件。
 - **📉 数据导出**: 支持将查询结果导出为 CSV/Excel 表格。
@@ -57,8 +57,6 @@ pip install -r requirements.txt
 
 **创建 `.env` 文件:**
 
-Ini, TOML
-
 ```
 # .env 示例
 # === 数据库配置 ===
@@ -91,10 +89,7 @@ streamlit run app.py
 
 ## 📂 项目结构
 
-Plaintext
-
 ```
-.
 ├── app.py                  # Streamlit 主程序入口 (UI逻辑)
 ├── config.py               # 配置加载器 (读取 .env)
 ├── schema.py               # 图谱 Schema 定义 (节点/属性映射)
