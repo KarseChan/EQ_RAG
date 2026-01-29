@@ -53,7 +53,7 @@ with st.sidebar:
                          "哪些防御区风险等级是中级？",
                          "承灾体里威胁财产最多的前5个？",
                          "哪些防御区是坡度较缓",
-                         "人工切坡高2米的防御区对应的负责人是谁"]
+                         "人工切坡高2米的防御区具体信息，以及对应的负责人是谁"]
     for q in example_questions:
         if st.button(q, width='stretch'):
             st.session_state.current_prompt = q

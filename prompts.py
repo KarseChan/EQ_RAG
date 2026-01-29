@@ -64,9 +64,7 @@ def get_system_prompt():
 - **触发条件**: 问题既包含模糊描述，又询问具体属性（例如：“有哪些植被破坏严重的地方？它们的负责人是谁？”）。
 - **执行链路 (Chain of Thought)**:
     1. **Step 1**: 调用 `search_knowledge_base` 获取相关地点的 `node_id` 列表。
-    2. **Step 2**: 从结果中提取 ID，**构建 Cypher 语句**查询关联信息。
-    3. **Example**: 
-       - `MATCH (n:防御区) WHERE n.id IN ['ID1', 'ID2'...] RETURN n.姓名, n.责任人`
+    2. **Step 2**: 从结果中提取 ID，**构建 Cypher 语句**,调用 `execute_cypher_query`查询关联信息。
 
 ---
 
