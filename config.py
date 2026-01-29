@@ -16,6 +16,9 @@ DB_CONFIG = {
 }
 
 GRAPH_NAME = os.getenv("GRAPH_NAME", "kg_graph2")
+ORIGIN_NAME = os.getenv("ORIGIN_NAME", "kg2_stg")
+
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "qwen-max")
 
 # 简单检查
 if not DASHSCOPE_API_KEY:

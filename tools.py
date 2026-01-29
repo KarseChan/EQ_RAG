@@ -2,9 +2,17 @@ import json, re
 import psycopg2
 from langchain_core.tools import tool
 from streamlit_agraph import agraph, Node, Edge, Config
+from sentence_transformers import SentenceTransformer, CrossEncoder
 
-from config import DB_CONFIG, GRAPH_NAME
+from config import DB_CONFIG, GRAPH_NAME, ORIGIN_NAME
 from prompts import get_zero_results_hint
+
+# 全局加载模型 (避免每次调用工具都重新加载，耗时)
+# 注意：Streamlit 启动时会执行这里，可能会稍微慢几秒
+print("⏳ 正在加载检索模型...")
+RETRIEVER = SentenceTransformer('BAAI/bge-small-zh-v1.5')
+RERANKER = CrossEncoder('BAAI/bge-reranker-base')
+print("✅ 模型加载完毕")
 
 def _clean_age_data(raw_data):
     """
@@ -78,6 +86,83 @@ def execute_cypher_query(cypher_query: str) -> str:
     finally:
         if conn:
             conn.close()
+
+@tool
+def search_knowledge_base(query: str) -> str:
+    """
+    语义检索工具。
+    当需要查找具体的防御区信息、核查描述，或者根据模糊的描述（如"坡度陡峭"、"植被稀疏"）查找地点时，使用此工具。
+    返回：最相关的防御区详细数据。
+    """
+    conn = None
+    try:
+        # 1. 将用户问题转向量
+        query_vector = RETRIEVER.encode(query).tolist()
+        
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        # 2. 数据库向量初筛 (Top 50)
+        # 使用 <=> 操作符计算余弦距离
+        sql = f"""
+            SELECT content, full_metadata, (embedding <=> %s::vector) as distance
+            FROM "{ORIGIN_NAME}"."防御区_embeddings" 
+            ORDER BY distance ASC
+            LIMIT 50
+        """
+        cursor.execute(sql, (json.dumps(query_vector),))
+        rows = cursor.fetchall()
+        
+        if not rows:
+            return "未找到相关信息。"
+            
+        # 3. 重排序 (Reranking) - 提升精度的关键
+        # 准备数据对: [[query, doc1], [query, doc2]...]
+        pairs = [[query, row[0]] for row in rows]
+        
+        # 计算相关性分数
+        scores = RERANKER.predict(pairs)
+        
+        # 将分数和原始数据绑定
+        ranked_results = []
+        for i in range(len(rows)):
+            ranked_results.append({
+                "score": float(scores[i]),
+                "data": rows[i][1] # full_metadata (JSON格式)
+            })
+            
+        # 按分数降序排列，取 Top 5
+        ranked_results.sort(key=lambda x: x["score"], reverse=True)
+        final_top_5 = ranked_results[:5]
+        
+        # 4. 格式化返回
+        result_str = f"🔍 根据描述 '{query}'，为您找到最匹配的 5 个结果：\n\n"
+        # 收集 ID 列表，显式告诉 Agent
+        found_ids = []
+        
+        for item in final_top_5:
+            data = item['data'] # full_metadata
+            # 必须确保这里能取到你在 ETL 里存的 node_id (对应图谱里的 id)
+            node_id = data.get('防御区编号') or data.get('id') 
+            name = data.get('姓名', '未知点')
+            desc = data.get('核查描述', '')
+            
+            found_ids.append(node_id)
+            
+            # 【关键】在返回文本里明确写出 ID，Agent 才能看懂
+            result_str += f"- [ID: {node_id}] **{name}** (匹配度: {item['score']:.2f})\n"
+            result_str += f"  描述: {desc}\n\n"
+            
+        # 【关键】在末尾加上这一句“提示词”，手把手教 Agent 下一步怎么做
+        result_str += f"\n💡 系统提示: 如果用户需要查询这些地点的更多关联信息（如位置、负责人），" \
+                      f"请使用工具 execute_cypher_query，并使用以下 ID 列表进行查询: {json.dumps(found_ids)}"
+            
+        return result_str
+
+    except Exception as e:
+        return f"检索出错: {str(e)}"
+    finally:
+        if conn: conn.close()
 
 
 def generate_graph_from_data(data_list):

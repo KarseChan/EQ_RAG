@@ -8,3 +8,4 @@ python-dotenv
 streamlit
 streamlit-agraph
 pandas
+sentence-transformers

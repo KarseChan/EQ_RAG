@@ -8,3 +8,6 @@ __pycache__/
 # 忽略 IDE 配置文件
 .vscode/
 .idea/
+
+# 忽略模型文件
+models/

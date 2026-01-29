@@ -8,8 +8,8 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from streamlit_agraph import agraph, Node, Edge, Config
 
 # --- 导入解耦的模块 ---
-from config import GRAPH_NAME
-from tools import execute_cypher_query, generate_graph_from_data
+from config import GRAPH_NAME, LLM_MODEL_NAME
+from tools import execute_cypher_query, generate_graph_from_data, search_knowledge_base
 from prompts import get_system_prompt       
 from memory import build_chat_context       
 
@@ -61,8 +61,8 @@ st.caption(f"当前连接图谱: `{GRAPH_NAME}` | 记忆模式: `{memory_type}`"
 @st.cache_resource
 def get_agent_instance():
     # 初始化模型
-    llm = ChatTongyi(model_name="qwen-max", temperature=0)
-    tools = [execute_cypher_query]
+    llm = ChatTongyi(model_name=LLM_MODEL_NAME, temperature=0)
+    tools = [execute_cypher_query, search_knowledge_base]
     
     # 从 prompts.py 获取提示词
     system_prompt = get_system_prompt()
