@@ -7,6 +7,15 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 from config import DB_CONFIG, GRAPH_NAME, ORIGIN_NAME
 from prompts import get_zero_results_hint
 
+
+# 定义映射关系：Agent 传过来的 category -> 数据库里的表名
+TABLE_MAP = {
+    "defense_area": "防御区_embeddings",  # 防御区
+    "checker": "核查人_embeddings",       # 核查人 (举例)
+    "device": "设备_embeddings"           # 设备 (举例)
+}
+
+
 # 全局加载模型 (避免每次调用工具都重新加载，耗时)
 # 注意：Streamlit 启动时会执行这里，可能会稍微慢几秒
 print("⏳ 正在加载检索模型...")
@@ -42,7 +51,7 @@ def execute_cypher_query(cypher_query: str) -> str:
     输入必须是纯 Cypher 语句，例如: MATCH (n:核查人) RETURN {info: n}
     不要包含 SQL 包装。
     """
-    print(f"\n[Tool] 收到 Cypher: {cypher_query}")
+    print(f"\n[图谱精准检索] 大模型生成的Cypher: {cypher_query}")
     
     conn = None
     try:
@@ -60,7 +69,7 @@ def execute_cypher_query(cypher_query: str) -> str:
         $$) as (result agtype);
         """
 
-        print(f"\n[Tool] 组装 sql: {full_sql}")
+        # print(f"\n[图谱精准检索] 组装的sql: {full_sql}")
         
         cursor.execute(full_sql)
         rows = cursor.fetchall()
@@ -71,12 +80,12 @@ def execute_cypher_query(cypher_query: str) -> str:
 
         # === 核心修改：零结果处理策略 ===
         if len(results) == 0:
-            print("[Tool] ⚠️ 查询结果为空，返回引导提示")
+            print("[图谱精准检索] ⚠️ 查询结果为空，返回引导提示")
             return get_zero_results_hint(query_info=cypher_query)
         # ===============================
 
-        print(f"[Tool] 返回 {len(results)} 条数据")
-        print(f"[Tool] ：{results}")
+        print(f"[图谱精准检索] 返回 {len(results)} 条数据")
+        print(f"[图谱精准检索] 内容：{results}")
         return json.dumps(results, ensure_ascii=False)
         
     except Exception as e:
@@ -88,12 +97,16 @@ def execute_cypher_query(cypher_query: str) -> str:
             conn.close()
 
 @tool
-def search_knowledge_base(query: str) -> str:
+def search_knowledge_base(query: str, category: str = "defense_area") -> str:
     """
-    语义检索工具。
-    当需要查找具体的防御区信息、核查描述，或者根据模糊的描述（如"坡度陡峭"、"植被稀疏"）查找地点时，使用此工具。
-    返回：最相关的防御区详细数据。
+    通用语义检索工具。
+    返回：匹配到的原始 JSON 数据列表。
     """
+    # 1. 确定要查哪张表
+    target_table = TABLE_MAP.get(category)
+    if not target_table:
+        return f"系统错误: 未知的分类 '{category}'，请检查工具调用参数。"
+
     conn = None
     try:
         # 1. 将用户问题转向量
@@ -106,7 +119,7 @@ def search_knowledge_base(query: str) -> str:
         # 使用 <=> 操作符计算余弦距离
         sql = f"""
             SELECT content, full_metadata, (embedding <=> %s::vector) as distance
-            FROM "{ORIGIN_NAME}"."防御区_embeddings" 
+            FROM "{ORIGIN_NAME}"."{target_table}" 
             ORDER BY distance ASC
             LIMIT 50
         """
@@ -134,30 +147,26 @@ def search_knowledge_base(query: str) -> str:
         # 按分数降序排列，取 Top 5
         ranked_results.sort(key=lambda x: x["score"], reverse=True)
         final_top_5 = ranked_results[:5]
+
+        print(f"[语义检索] 内容： {final_top_5}")
         
-        # 4. 格式化返回
-        result_str = f"🔍 根据描述 '{query}'，为您找到最匹配的 5 个结果：\n\n"
-        # 收集 ID 列表，显式告诉 Agent
-        found_ids = []
-        
-        for item in final_top_5:
-            data = item['data'] # full_metadata
-            # 必须确保这里能取到你在 ETL 里存的 node_id (对应图谱里的 id)
-            node_id = data.get('防御区编号') or data.get('id') 
-            name = data.get('姓名', '未知点')
-            desc = data.get('核查描述', '')
+        # 4. 格式化返回 (通用化改造)
+        final_response = {
+            # 1. 元数据 (Meta Info)：告诉 LLM 这是怎么来的
+            "meta_context": {
+                "source_tool": "vector_semantic_search", # 明确告知是向量检索
+                "retrieval_query": query,                # 明确告知用的什么关键词查的
+                "target_category": category,             # 明确告知查的什么分类
+                "record_count": len(final_top_5),     # 查到了几条
+                "description": "The following data was retrieved based on vector semantic similarity. Please use this context to answer the user's question."
+            },
             
-            found_ids.append(node_id)
-            
-            # 【关键】在返回文本里明确写出 ID，Agent 才能看懂
-            result_str += f"- [ID: {node_id}] **{name}** (匹配度: {item['score']:.2f})\n"
-            result_str += f"  描述: {desc}\n\n"
-            
-        # 【关键】在末尾加上这一句“提示词”，手把手教 Agent 下一步怎么做
-        result_str += f"\n💡 系统提示: 如果用户需要查询这些地点的更多关联信息（如位置、负责人），" \
-                      f"请使用工具 execute_cypher_query，并使用以下 ID 列表进行查询: {json.dumps(found_ids)}"
-            
-        return result_str
+            # 2. 数据载荷 (Payload)：纯净的原始数据列表
+            "search_results": final_top_5
+        }
+
+        # 返回整个大的 JSON 对象
+        return json.dumps(final_response, ensure_ascii=False, indent=2)
 
     except Exception as e:
         return f"检索出错: {str(e)}"

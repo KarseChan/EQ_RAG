@@ -50,7 +50,10 @@ def get_system_prompt():
 
 ### 1. 语义/模糊查询 (Scenario: Descriptive/Vague)
 - **触发条件**: 当问题包含“植被稀疏”、“地势险峻”、“容易滑坡”、“哪里风险大”等抽象描述，且无法直接对应 Schema 属性时。
-- **行动**: **必须优先**调用 `search_knowledge_base`。
+- **行动**: **必须优先**调用 `search_knowledge_base`,你会收到一串 **JSON 格式的原始数据**,
+         仔细阅读 JSON 中的 `raw_data` 字段。不要直接把 JSON 扔给用户！
+         你需要用自然语言，条理清晰地把数据里的关键信息整理出来
+         遇到 JSON 中的空值 (null/None) 直接忽略，不要说“未知”
 - **禁忌**: 不要尝试用 Cypher 写复杂的 `CONTAINS` 或正则匹配，效率极低。
 
 ### 2. 结构化/关系查询 (Scenario: Exact/Relational)
@@ -82,7 +85,7 @@ def get_system_prompt():
    - **查关系**: `RETURN {{source: a, rel: r, target: b}}`
 
 3. **空值处理**:
-   - 涉及排序 (ORDER BY) 或极值 (Top N) 时，必须加上 `WHERE n.prop IS NOT NULL`，防止 NULL 干扰排序。
+   - 只有当涉及排序 (ORDER BY) 或极值 (Top N) 时，有且必须加上 `WHERE n.prop IS NOT NULL`，防止 NULL 干扰排序。
 
 4. **严禁生成 SQL**: 只输出 MATCH/RETURN 语句。
 

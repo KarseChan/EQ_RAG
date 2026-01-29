@@ -49,7 +49,11 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("### 💡 快捷提问")
-    example_questions = ["朱炳湖负责的防御区中面积最大的是哪个？", "哪些防御区风险等级是中级？", "承灾体里威胁财产最多的前5个？"]
+    example_questions = ["朱炳湖负责的防御区中面积最大的是哪个？",
+                         "哪些防御区风险等级是中级？",
+                         "承灾体里威胁财产最多的前5个？",
+                         "哪些防御区是坡度较缓",
+                         "人工切坡高2米的防御区对应的负责人是谁"]
     for q in example_questions:
         if st.button(q, width='stretch'):
             st.session_state.current_prompt = q
@@ -136,18 +140,30 @@ if user_input:
             raw_data_json = None # 保存原始 JSON 列表
             raw_data_df = None   # 保存表格 DF
 
-            print(f"[App] ：{result['messages']}")
+            print(f"[App] Agent回复的信息：{result['messages']}")
 
             # 提取数据
             raw_data_list = []
             for msg in result['messages']:
                 if isinstance(msg, ToolMessage):
                     try:
-                        # 因为 Tool 已经清洗干净了，这里直接 load 就行
+                        # 1. 解析 JSON
                         data = json.loads(msg.content)
+                        
+                        # 2. 情况 A: 图谱查询 (直接返回 List)
                         if isinstance(data, list):
-                            raw_data_list = data
-                    except: pass
+                            raw_data_list.extend(data) # 建议用 extend 而不是 =，防止被覆盖
+                        
+                        # 3. 情况 B: 语义检索 (返回 Dict，数据在 'search_results' 里)
+                        elif isinstance(data, dict):
+                            # 优先找 search_results
+                            if 'search_results' in data and isinstance(data['search_results'], list):
+                                raw_data_list.extend(data['search_results'])
+                            # 兼容性兜底: 如果以后有其他返回 dict 的工具，也可以在这里处理
+                            
+                    except Exception as e:
+                        print(f"数据解析失败: {e}")
+                        pass
             
             # === 1. 展示图谱 (新增功能) ===
             # if raw_data_jPson is not None:
@@ -160,7 +176,7 @@ if user_input:
             #             agraph(nodes=nodes, edges=edges, config=config)
             
             # === 2. 展示表格 (原有功能) ===
-            print(f'raw_data_df: {raw_data_df}')
+            print(f'展示表格数据: {raw_data_df}')
             # 显示表格
             if raw_data_list:
                 df = pd.json_normalize(raw_data_list)
