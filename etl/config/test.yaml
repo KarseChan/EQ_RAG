@@ -1,0 +1,136 @@
+# etl_rules.yaml
+# 定义：从 GDB 到 Ontology 的映射逻辑
+
+# ==========================================
+# 全局设置
+# ==========================================
+global_config:
+  # GDB 文件的实际存储路径
+  database_path: "./data/惠州市惠东县梁化镇.gdb"
+
+# ==========================================
+# 1. 实体映射：防御区 (DefenseZone)
+# ==========================================
+DefenseZone_Mapping:
+  # GDB 中的对应图层名称 (请在 ArcGIS/QGIS 中确认具体名称)
+  source_layer: "防御区"  
+  entity_type: "防御区"
+  
+  # 主键生成规则
+  key_rule:
+    field: "tybh"
+    prefix: "zone_"
+
+  attributes:
+    - target: "统一编号"
+      source: "tybh"
+    
+    - target: "风险等级"
+      source: "fyqdj"
+
+    # --- 空间数据处理 (GDB优势) ---
+    # GDB读取库(如GeoPandas)会自动把空间信息读为 'geometry' 列
+    - target: "空间位置"
+      source: "geometry" 
+      dtype: "wkt" # 指示引擎将其序列化为文本格式
+
+    - target: "坡度"
+      source: "xppd"
+      dtype: "float"
+
+# ==========================================
+# 2. 实体映射：承灾体 (ElementAtRisk)
+# ==========================================
+ElementAtRisk_Mapping:
+  source_layer: "承灾体"
+  entity_type: "承灾体"
+
+  key_rule:
+    field: "id"
+    prefix: "elem_"
+
+  attributes:
+    - target: "统一编号"
+      source: "id"
+
+    - target: "建筑面积"
+      source: "jzmj"
+      dtype: "float"
+
+    # ... 其他属性映射 ...
+
+  relationships:
+    - relation: "位于"
+      target_type: "防御区"
+      # 利用 GDB 字段关联
+      foreign_key_field: "ysfyqtybh" 
+      target_key_prefix: "zone_"
+
+# ==========================================
+# 3. 实体映射：受灾家庭 (Household)
+# ==========================================
+Household_Mapping:
+  source_layer: "承灾体"
+  entity_type: "受灾家庭"
+  
+  # 【问题1解决方案】
+  # 明确写入模式为 "merge" (Upsert模式)
+  key_rule:
+    fields: ["lxr", "lxfs"] 
+    prefix: "family_"
+    method: "md5"
+    # 核心指令：告诉引擎如果ID重复，就在同一个对象里面再增加一个relation
+    deduplication_policy: "merge_relation"
+
+  attributes:
+    - target: "户主姓名"
+      source: "lxr"
+      
+    - target: "联系电话"
+      source: "lxfs"
+
+    - target: "家庭总人数"
+      # 这里要专门写一个calc_sum_fields函数，用于指定字段的求和，注意，如果字段非法也要忽略处理
+      transform_func: "calc_sum_fields"
+      params:
+        columns: ["nljg1", "nljg2", "nljg3"]
+
+    # "弱势群体" 是一个复合属性，包含总数和子类明细
+    - target: "弱势群体"
+      type: "nested"  # 告诉引擎这是一个复合对象
+      children:
+        # 父级：行动受限总人数 (计算得出)
+        - target: "行动受限人数"
+          transform_func: "calc_sum_fields"
+          params:
+            columns: ["nljg1", "nljg3"]
+          
+          # 子级：具体分类 (来源于原始字段)
+          subsets:
+            - target: "儿童_0_14岁"
+              source: "nljg1"
+              default: 0
+              
+            - target: "老人_60岁以上"
+              source: "nljg3"
+              default: 0
+              
+            # 未来扩展：残障人士 (目前数据源没有)
+            - target: "残障人士"
+              default: 0
+
+  relationships:
+    # 动态的 relation 字符串，使用 dynamic_relation 选择器
+    - target_type: "承灾体"
+      foreign_key_field: "id"
+      
+      # 动态决定关系的名称
+      dynamic_relation:
+        source_column: "sffzijgtw"
+        rules:
+          - match_value: 0
+            relation_name: "拥有"
+            
+          # 兜底规则：只要不是0，都视为"居住于"
+          - match_value: "otherwise"
+            relation_name: "居住于"

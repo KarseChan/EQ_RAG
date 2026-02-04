@@ -51,7 +51,7 @@ pip install -r requirements.txt
 
 
 
-2、运行download_models下载向量化和重排序模型
+### 2、运行scripts/download_models下载向量化和重排序模型
 
 
 
@@ -81,33 +81,15 @@ EMBEDDING_MODEL_NAME=text-embedding-v1
 
 ### 4. 数据初始化 (ETL)
 
-如果你是第一次运行，需要初始化向量索引：
+构建向量索引: 运行脚本将图谱中的文本数据（如核查描述）向量化并存入 `node_embeddings` 表。
 
-1. **启用数据库插件**:
-
-   SQL
-
-   ```
-   -- 在 PostgreSQL 中执行
-   CREATE EXTENSION age;
-   CREATE EXTENSION vector;
-   LOAD 'age';
-   SET search_path = ag_catalog, "$user", public;
-   ```
-
-2. **构建向量索引**: 运行脚本将图谱中的文本数据（如核查描述）向量化并存入 `node_embeddings` 表。
-
-   Bash
-
-   ```
-   python scripts/etl_vector_local.py
-   ```
+```
+python scripts/etl_vector_local.py
+```
 
 
 
 ### 5. 启动应用
-
-Bash
 
 ```
 streamlit run app.py
