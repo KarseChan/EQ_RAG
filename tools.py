@@ -1,4 +1,4 @@
-import json, re
+import json, re, os
 import psycopg2
 from langchain_core.tools import tool
 from streamlit_agraph import agraph, Node, Edge, Config
@@ -18,10 +18,58 @@ TABLE_MAP = {
 
 # 全局加载模型 (避免每次调用工具都重新加载，耗时)
 # 注意：Streamlit 启动时会执行这里，可能会稍微慢几秒
+# print("⏳ 正在加载检索模型...")
+# RETRIEVER = SentenceTransformer('BAAI/bge-small-zh-v1.5')
+# RERANKER = CrossEncoder('BAAI/bge-reranker-base')
+# print("✅ 模型加载完毕")
+
+# 改为
+# 设置模型本地路径
+MODEL_DIR = "./models"  # 确保这与下载模型的路径一致
+EMBEDDING_MODEL_PATH = os.path.join(MODEL_DIR, "bge-small-zh-v1.5")
+RERANKER_MODEL_PATH = os.path.join(MODEL_DIR, "bge-reranker-base")
+
+# 设置离线环境变量（关键！）
+os.environ['TRANSFORMERS_OFFLINE'] = '1'
+os.environ['HF_HUB_OFFLINE'] = '1'
+
+# 全局加载模型 (避免每次调用工具都重新加载，耗时)
 print("⏳ 正在加载检索模型...")
-RETRIEVER = SentenceTransformer('BAAI/bge-small-zh-v1.5')
-RERANKER = CrossEncoder('BAAI/bge-reranker-base')
-print("✅ 模型加载完毕")
+
+# 检查模型文件是否存在
+if not os.path.exists(EMBEDDING_MODEL_PATH):
+    print(f"❌ 错误：嵌入模型路径不存在: {EMBEDDING_MODEL_PATH}")
+    print("请先运行模型下载脚本！")
+    RETRIEVER = None
+else:
+    try:
+        RETRIEVER = SentenceTransformer(EMBEDDING_MODEL_PATH)
+        print(f"✅ 嵌入模型已从本地加载: {EMBEDDING_MODEL_PATH}")
+    except Exception as e:
+        print(f"❌ 嵌入模型加载失败: {e}")
+        RETRIEVER = None
+
+if not os.path.exists(RERANKER_MODEL_PATH):
+    print(f"❌ 错误：重排序模型路径不存在: {RERANKER_MODEL_PATH}")
+    print("请先运行模型下载脚本！")
+    RERANKER = None
+else:
+    try:
+        RERANKER = CrossEncoder(RERANKER_MODEL_PATH)
+        print(f"✅ 重排序模型已从本地加载: {RERANKER_MODEL_PATH}")
+    except Exception as e:
+        print(f"❌ 重排序模型加载失败: {e}")
+        RERANKER = None
+
+if RETRIEVER and RERANKER:
+    print("✅ 所有模型加载完毕，可以正常使用")
+else:
+    print("⚠️ 警告：部分模型加载失败，相关功能可能无法使用")
+
+
+
+
+
 
 def _clean_age_data(raw_data):
     """
@@ -102,6 +150,12 @@ def search_knowledge_base(query: str, category: str = "defense_area") -> str:
     通用语义检索工具。
     返回：匹配到的原始 JSON 数据列表。
     """
+    # 检查模型是否已加载
+    if RETRIEVER is None or RERANKER is None:
+        error_msg = "模型未正确加载，请检查模型文件是否已下载并放置在正确位置。"
+        print(f"[语义检索] ❌ 错误: {error_msg}")
+        return error_msg
+    
     # 1. 确定要查哪张表
     target_table = TABLE_MAP.get(category)
     if not target_table:
